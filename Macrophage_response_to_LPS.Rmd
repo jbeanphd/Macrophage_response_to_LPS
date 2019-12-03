@@ -1,0 +1,547 @@
+---
+title: "Macrophage response to LPS"
+author: "Jonathan Bean"
+date: "2019-10-27"
+output: html_document
+---
+
+This project is looking at macrophage gene expression response to LPS in two different tissues, Liver and Heart at two different time points, 4 hours and 2 weeks post injection, as well as, a PBS injection control. The project involves a ribosomal tagging technique that is Cre / LoxP dependent. The Cre driver is specific for macrophages and there is an HA - tag that is only exposed after Cre LoxP recombination on Rpl22, a gene that encodes a protein that associates with ribosomes. A small portion of tissue homogenate is saved for a background reading and is denoted here as 'N' for input, while the bulk to the homogenate is used for immunoprecipitating polyribosomes specifically from macrophages, labeled 'IP' here. 
+
+Libraries required for project
+```{r, echo=TRUE}
+##############libraries################
+#install.packages('tidyr')
+#install.packages('dplyr')
+#install.packages('ggplot2')
+#install.packages('limma')
+#install.packages('extrafont')
+#loadfonts()
+#install.packages('ggfortify')
+#install.packages('tidyverse')
+
+
+library(tidyr)
+library(dplyr)
+library(ggplot2)
+library(limma)
+library(extrafont)
+library(ggfortify)
+library(tidyverse)
+```
+
+Import dataset and save as an object. Discard unneeded columns from dataset. I am keeping 'tracking_id", "condition", and  "FPKM" values and saving this as a second object. 
+```{r}
+cuffnorm1 <- read.delim("../cuffnorm3/genes.read_group_tracking")
+
+cuffnorm2 <- cuffnorm1[,c(1,2,3,7)]
+```
+
+The output from cufflinks follows 'The Grammar of Graphics'. This is a standard for anyone working with larger datasets within data focused coding languages like 'R', 'Python', or 'Matlab'. However it is not easy to look at if trying to interact with the data in a spreadsheet like 'excel'. This is the code to turn the output into something more friendly to look at in an excel file. (For a colleague).
+
+First I will group at 'tracking_id', 'condition', and 'replicate' (There are no replicates here but this is totally artificial and only for ease of making the excel file). -4 indicates everything except variable 4 which is 'FPKM'. 
+
+```{r}
+cuffnorm3 <- cuffnorm2 %>% group_by_at(-4) %>% 
+  mutate(count=1:n()) %>% ungroup %>%
+  spread(key = "condition","replicate", value = "FPKM")
+```
+
+Next I am renaming the variable 'tracking_id' to 'gene'.
+
+```{r}
+colnames(cuffnorm3)[colnames(cuffnorm3)=="tracking_id"] <- "gene"
+```
+
+
+While the output file 'cds.diff' doesn't populate with useful data it does provide a list of coding genes. I am importing that list here.
+
+```{r}
+coding <- read.delim('../cuffdiff/PBS_Liver_v_Heart/cds.diff') %>% select('gene')
+```
+
+Now I am using a filter to keep only the 'gene's that are listed in the cds.diff file. I am deleted columns 2 and 3 as they do not contain any useful information.
+
+```{r}
+cuffnorm4 <- inner_join(cuffnorm3, coding, by = "gene")
+cuffnorm4 <- cuffnorm4[,-c(2,3)]
+```
+
+Finally, I am writing this object out to a csv. I will then open this in a spreadsheet software and save it as an excel file. This is the file I gave to collaborating colleagues.
+
+```{r}
+write.csv(cuffnorm4, file = "LPS_timecourse_w_inputs_v3.csv")
+```
+
+For some reason the above manipulations caused the numeric output to transform into character data. Here I delete the column "gene" that contains character data, transform the numeric data back into numeric format, then add back the 'gene' column. 
+
+```{r}
+cuffnorm5 <- cuffnorm4[,-1] %>% sapply(as.numeric)
+cuffnorm5 <- cbind(cuffnorm4[1], cuffnorm5)
+```
+
+```{r}
+view(cuffnorm5) %>% head()
+```
+
+Here I add columns for average 'input', 'IP', and 'IP/N' for each condition. I add a small constant to the IP and N when doing division to avoid divided by zero errors. 
+
+```{r}
+cuffnorm6 <- cuffnorm5 %>%  group_by(gene) %>%  
+  mutate(Liver_PBS_N = mean(c(Liver_PBS_N1,Liver_PBS_N2)), 
+         Liver_PBS_IP=mean(c(Liver_PBS_IP1, Liver_PBS_IP2)),
+         Liver_PBS_Enr = ((Liver_PBS_IP + 0.01)/(Liver_PBS_N + 0.01)),
+         Liver_LPS_4hr_N = mean(c(Liver_LPS_4hr_N1,Liver_LPS_4hr_N2)), 
+         Liver_LPS_4hr_IP =mean(c(Liver_LPS_4hr_IP1,Liver_LPS_4hr_IP2)),
+         Liver_LPS_4hr_Enr = ((Liver_LPS_4hr_IP + 0.01)/(Liver_LPS_4hr_N + 0.01)),
+         Liver_LPS_2wk_N = mean(c(Liver_LPS_2wk_N1,Liver_LPS_2wk_N2)),
+         Liver_LPS_2wk_IP = mean(c(Liver_LPS_2wk_IP1,Liver_LPS_2wk_IP2)),
+         Liver_LPS_2wk_Enr = ((Liver_LPS_2wk_IP + 0.01)/(Liver_LPS_2wk_N + 0.01)),
+         Heart_PBS_N = mean(c(Heart_PBS_N1,Heart_PBS_N2)), 
+         Heart_PBS_IP=mean(c(Heart_PBS_IP1, Heart_PBS_IP2)),
+         Heart_PBS_Enr = ((Heart_PBS_IP + 0.01)/(Heart_PBS_N + 0.01)),
+         Heart_LPS_4hr_N = mean(c(Heart_LPS_4hr_N1,Heart_LPS_4hr_N2)), 
+         Heart_LPS_4hr_IP =mean(c(Heart_LPS_4hr_IP1,Heart_LPS_4hr_IP2)),
+         Heart_LPS_4hr_Enr = ((Heart_LPS_4hr_IP + 0.01)/(Heart_LPS_4hr_N + 0.01)),
+         Heart_LPS_2wk_N = mean(c(Heart_LPS_2wk_N1,Heart_LPS_2wk_N2)),
+         Heart_LPS_2wk_IP = mean(c(Heart_LPS_2wk_IP1,Heart_LPS_2wk_IP2)),
+         Heart_LPS_2wk_Enr = ((Heart_LPS_2wk_IP + 0.01)/(Heart_LPS_2wk_N + 0.01)))
+```
+
+```{r}
+view(cuffnorm6) %>% head()
+```
+
+Next I identify genes that have greater than 5 FPKM in IP and 5 fold enriched IP over input for each condition and save each as an object that is a list of genes. 
+
+```{r}
+Liver_PBS_Enriched <- cuffnorm6 %>% filter(Liver_PBS_Enr > 5, Liver_PBS_IP > 5) %>% 
+  select(gene)
+
+
+Liver_LPS_4hr_Enriched <- cuffnorm6 %>% filter(Liver_LPS_4hr_Enr > 5, Liver_LPS_4hr_IP > 5) %>% 
+  select(gene)
+
+Liver_LPS_2wk_Enriched <- cuffnorm6 %>% filter(Liver_LPS_2wk_Enr > 5, Liver_LPS_2wk_IP > 5) %>% 
+  select(gene)
+
+
+Heart_PBS_Enriched <- cuffnorm6 %>% filter(Heart_PBS_Enr > 5, Heart_PBS_IP > 5) %>% 
+  select(gene)
+
+Heart_LPS_4hr_Enriched <- cuffnorm6 %>% filter(Heart_LPS_4hr_Enr > 5, Heart_LPS_4hr_IP > 5) %>% 
+  select(gene)
+
+Heart_LPS_2wk_Enriched <- cuffnorm6 %>% filter(Heart_LPS_2wk_Enr > 5, Heart_LPS_2wk_IP > 5) %>% 
+  select(gene)
+
+```
+
+
+I rename each condition column of 'gene' to match the condition it comes from.
+
+```{r}
+Liver_PBS_Enr <- Liver_PBS_Enriched %>% `colnames<-`('Liver.steady.state')
+Liver_LPS_4hr_Enr <- Liver_LPS_4hr_Enriched %>% `colnames<-`('4hr.liver')
+Liver_LPS_2wk_Enr <- Liver_LPS_2wk_Enriched %>% `colnames<-`('2wk.liver')
+Heart_PBS_Enr <- Heart_PBS_Enriched %>% `colnames<-`('Heart.steady.state')
+Heart_LPS_4hr_Enr <- Heart_LPS_4hr_Enriched %>% `colnames<-`('4hr.heart')
+Heart_LPS_2wk_Enr <- Heart_LPS_2wk_Enriched %>% `colnames<-`('2wk.heart')
+```
+
+I want to join these list but 'R' requires the list be of equal length. First I determine what the longest length of list is and save this as an object.
+
+```{r}
+n2 <- max(nrow(Liver_PBS_Enr), nrow(Liver_LPS_4hr_Enr), nrow(Liver_LPS_2wk_Enr), nrow(Heart_PBS_Enr),
+         nrow(Heart_LPS_4hr_Enr), nrow(Heart_LPS_2wk_Enr))
+```
+
+
+Now I am filling in 'NA' for values in list with less than maximum length. I am omitting the one list with the maximum length because when it was included it replace the final value with 'NA'. 
+
+```{r}
+Liver_PBS_Enr[nrow(Liver_PBS_Enr)+(n2 - nrow(Liver_PBS_Enr)),] <- NA
+Liver_LPS_4hr_Enr[nrow(Liver_LPS_4hr_Enr)+(n2 - nrow(Liver_LPS_4hr_Enr)),] <- NA
+Liver_LPS_2wk_Enr[nrow(Liver_LPS_2wk_Enr)+(n2 - nrow(Liver_LPS_2wk_Enr)),] <- NA
+Heart_PBS_Enr[nrow(Heart_PBS_Enr)+(n2 - nrow(Heart_PBS_Enr)),] <- NA
+
+Heart_LPS_2wk_Enr[nrow(Heart_LPS_2wk_Enr)+(n2 - nrow(Heart_LPS_2wk_Enr)),] <- NA
+```
+
+
+Now I am able to join the list. I save this as a csv that I later open in spreadsheet software and save as an excel file. Colleagues’ request.
+
+```{r}
+Enr_list <- bind_cols(Liver_PBS_Enr, Liver_LPS_4hr_Enr, Liver_LPS_2wk_Enr, 
+                      Heart_PBS_Enr, Heart_LPS_4hr_Enr, Heart_LPS_2wk_Enr)
+write.csv(Enr_list, file = 'Enriched_genes_v4.csv', na='', row.names = FALSE)
+
+view(Enr_list) %>% head(n=10)
+```
+
+I am now import a list of transcription factors from - I’ve lost the source because of a deactivated email - but my collaborating colleague should still have it. I downloaded the file now I am importing it and saving the column with the 'gene' information.
+
+```{r}
+TSF <- read.delim('../TSF.txt') %>% select('gene')
+```
+
+
+Now I filter the list of enriched genes saving only those that appear on the transcription factors list. Again I rename each 'gene' column to match the condition it comes from.
+
+```{r}
+TF_Liver_PBS_Enr <- Liver_PBS_Enriched %>% inner_join(TSF, by = 'gene') %>% `colnames<-`('Liver.steady.state')
+TF_Liver_LPS_4hr_Enr <- Liver_LPS_4hr_Enriched %>% inner_join(TSF, by = 'gene') %>% `colnames<-`('4hr.liver')
+TF_Liver_LPS_2wk_Enr <- Liver_LPS_2wk_Enriched %>% inner_join(TSF, by = 'gene') %>% `colnames<-`('2wk.liver')
+TF_Heart_PBS_Enr <- Heart_PBS_Enriched %>% inner_join(TSF, by = 'gene') %>% `colnames<-`('Heart.steady.state')
+TF_Heart_LPS_4hr_Enr <- Heart_LPS_4hr_Enriched %>% inner_join(TSF, by = 'gene') %>% `colnames<-`('4hr.heart')
+TF_Heart_LPS_2wk_Enr <- Heart_LPS_2wk_Enriched %>% inner_join(TSF, by = 'gene') %>% `colnames<-`('2wk.heart')
+```
+
+I am looking for the longest length of list among these conditions. 
+
+```{r}
+n3 <- max(nrow(TF_Liver_PBS_Enr), nrow(TF_Liver_LPS_4hr_Enr), nrow(TF_Liver_LPS_2wk_Enr), 
+          nrow(TF_Heart_PBS_Enr), nrow(TF_Heart_LPS_4hr_Enr), nrow(TF_Heart_LPS_2wk_Enr))
+```
+
+
+Using the maximum length I fill in 'NA' in the lists shorter than the maximum length.
+
+```{r}
+TF_Liver_PBS_Enr[nrow(TF_Liver_PBS_Enr)+(n3 - nrow(TF_Liver_PBS_Enr)),] <- NA
+TF_Liver_LPS_4hr_Enr[nrow(TF_Liver_LPS_4hr_Enr)+(n3 - nrow(TF_Liver_LPS_4hr_Enr)),] <- NA
+TF_Liver_LPS_2wk_Enr[nrow(TF_Liver_LPS_2wk_Enr)+(n3 - nrow(TF_Liver_LPS_2wk_Enr)),] <- NA
+TF_Heart_PBS_Enr[nrow(TF_Heart_PBS_Enr)+(n3 - nrow(TF_Heart_PBS_Enr)),] <- NA
+
+TF_Heart_LPS_2wk_Enr[nrow(TF_Heart_LPS_2wk_Enr)+(n3 - nrow(TF_Heart_LPS_2wk_Enr)),] <- NA
+```
+
+I now join the list and write this as a csv. Later I open this in a spreadsheet software and save it as an excel file for my colleagues use.
+
+```{r}
+TF_enr_list2 <- bind_cols(TF_Liver_PBS_Enr, TF_Liver_LPS_4hr_Enr, TF_Liver_LPS_2wk_Enr, 
+                          TF_Heart_PBS_Enr, TF_Heart_LPS_4hr_Enr, TF_Heart_LPS_2wk_Enr)
+write.csv(TF_enr_list2, file = 'TF_Enriched_genes_v4.csv', na='', row.names = FALSE)
+
+view(TF_enr_list2) %>% head()
+```
+
+I want to make a scatter plot of input vs IP values and highlight the genes I identified as enriched earlier. I create an object for each condition that includes the input and IP values and create an additional column that identifies whether or not the gene is considered enriched 'Enr' (IP > 5 FPKM, IP/N > 5).
+
+```{r}
+Liver_PBS <- cuffnorm6 %>% inner_join(Liver_PBS_Enriched) %>% 
+  select(gene, Liver_PBS_N1, Liver_PBS_N2,Liver_PBS_IP1,Liver_PBS_IP2, Liver_PBS_N,Liver_PBS_IP, Liver_PBS_Enr) %>% 
+  mutate(Enr = 'yes')
+
+temp001 <- cuffnorm6 %>% anti_join(Liver_PBS_Enriched) %>% 
+  select(gene, Liver_PBS_N1, Liver_PBS_N2,Liver_PBS_IP1,Liver_PBS_IP2, Liver_PBS_N,Liver_PBS_IP, Liver_PBS_Enr) %>% 
+  mutate(Enr = 'no')
+
+Liver_PBS <- rbind(Liver_PBS, temp001)
+
+
+Liver_LPS_4hr <- cuffnorm6 %>% inner_join(Liver_LPS_4hr_Enriched) %>% 
+  select(gene, Liver_LPS_4hr_N1, Liver_LPS_4hr_N2,Liver_LPS_4hr_IP1,Liver_LPS_4hr_IP2, Liver_LPS_4hr_N,Liver_LPS_4hr_IP, Liver_LPS_4hr_Enr) %>% 
+  mutate(Enr = 'yes')
+
+temp002 <- cuffnorm6 %>% anti_join(Liver_LPS_4hr_Enriched) %>% 
+  select(gene, Liver_LPS_4hr_N1, Liver_LPS_4hr_N2,Liver_LPS_4hr_IP1,Liver_LPS_4hr_IP2, Liver_LPS_4hr_N,Liver_LPS_4hr_IP, Liver_LPS_4hr_Enr) %>% 
+  mutate(Enr = 'no')
+
+Liver_LPS_4hr <- rbind(Liver_LPS_4hr, temp002)
+
+
+Liver_LPS_2wk <- cuffnorm6 %>% inner_join(Liver_LPS_2wk_Enriched) %>% 
+  select(gene, Liver_LPS_2wk_N1, Liver_LPS_2wk_N2,Liver_LPS_2wk_IP1,Liver_LPS_2wk_IP2, Liver_LPS_2wk_N,Liver_LPS_2wk_IP, Liver_LPS_2wk_Enr) %>% 
+  mutate(Enr = 'yes')
+
+temp003 <- cuffnorm6 %>% anti_join(Liver_LPS_2wk_Enriched) %>% 
+  select(gene, Liver_LPS_2wk_N1, Liver_LPS_2wk_N2,Liver_LPS_2wk_IP1,Liver_LPS_2wk_IP2, Liver_LPS_2wk_N,Liver_LPS_2wk_IP, Liver_LPS_2wk_Enr) %>% 
+  mutate(Enr = 'no')
+
+Liver_LPS_2wk <- rbind(Liver_LPS_2wk, temp003)
+
+
+
+
+Heart_PBS <- cuffnorm6 %>% inner_join(Heart_PBS_Enriched) %>% 
+  select(gene, Heart_PBS_N1, Heart_PBS_N2,Heart_PBS_IP1,Heart_PBS_IP2, Heart_PBS_N,Heart_PBS_IP, Heart_PBS_Enr) %>% 
+  mutate(Enr = 'yes')
+
+temp004 <- cuffnorm6 %>% anti_join(Heart_PBS_Enriched) %>% 
+  select(gene, Heart_PBS_N1, Heart_PBS_N2,Heart_PBS_IP1,Heart_PBS_IP2, Heart_PBS_N,Heart_PBS_IP, Heart_PBS_Enr) %>% 
+  mutate(Enr = 'no')
+
+Heart_PBS <- rbind(Heart_PBS, temp004)
+
+
+Heart_LPS_4hr <- cuffnorm6 %>% inner_join(Heart_LPS_4hr_Enriched) %>% 
+  select(gene, Heart_LPS_4hr_N1, Heart_LPS_4hr_N2,Heart_LPS_4hr_IP1,Heart_LPS_4hr_IP2, Heart_LPS_4hr_N,Heart_LPS_4hr_IP, Heart_LPS_4hr_Enr) %>% 
+  mutate(Enr = 'yes')
+
+temp005 <- cuffnorm6 %>% anti_join(Heart_LPS_4hr_Enriched) %>% 
+  select(gene, Heart_LPS_4hr_N1, Heart_LPS_4hr_N2,Heart_LPS_4hr_IP1,Heart_LPS_4hr_IP2, Heart_LPS_4hr_N,Heart_LPS_4hr_IP, Heart_LPS_4hr_Enr) %>% 
+  mutate(Enr = 'no')
+
+Heart_LPS_4hr <- rbind(Heart_LPS_4hr, temp005)
+
+
+Heart_LPS_2wk <- cuffnorm6 %>% inner_join(Heart_LPS_2wk_Enriched) %>% 
+  select(gene, Heart_LPS_2wk_N1, Heart_LPS_2wk_N2,Heart_LPS_2wk_IP1,Heart_LPS_2wk_IP2, Heart_LPS_2wk_N,Heart_LPS_2wk_IP, Heart_LPS_2wk_Enr) %>% 
+  mutate(Enr = 'yes')
+
+temp006 <- cuffnorm6 %>% anti_join(Heart_LPS_2wk_Enriched) %>% 
+  select(gene, Heart_LPS_2wk_N1, Heart_LPS_2wk_N2,Heart_LPS_2wk_IP1,Heart_LPS_2wk_IP2, Heart_LPS_2wk_N,Heart_LPS_2wk_IP, Heart_LPS_2wk_Enr) %>% 
+  mutate(Enr = 'no')
+
+Heart_LPS_2wk <- rbind(Heart_LPS_2wk, temp006)
+
+```
+
+
+Now I will plot each condition input vs IP transforming FPKM by log2. I am adding a small constant to avoid log2 zero errors. 
+
+```{r}
+Liver_PBS %>%
+  ggplot(aes(log2(Liver_PBS_N +0.1), log2(Liver_PBS_IP+0.1), color = Enr)) + 
+  geom_point(alpha = 0.3)  + scale_color_manual(values=c("black", "red")) +
+  theme_bw()  +
+  labs(x = "log2(Input FPKM + 0.1)", y = "log2(IP FPKM + 0.1)", 
+       title = "Steady State Liver", family = 'Arial') +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  theme(text = element_text(size = 16, family='Arial'), axis.text.x = element_text(size = 16, family = 'Arial', color = 'black'),
+        axis.text.y = element_text(size = 16, family = 'Arial', color = 'black')) +
+  theme(legend.position="none") +
+  scale_x_continuous(limits=c(-3.35,16.1), breaks = c(0, 5, 10, 15)) +
+  scale_y_continuous(limits=c(-3.35,16.1), breaks = c(0, 5, 10, 15))
+
+
+Liver_LPS_4hr %>%
+  ggplot(aes(log2(Liver_LPS_4hr_N +0.1), log2(Liver_LPS_4hr_IP+0.1), color = Enr)) + 
+  geom_point(alpha = 0.3)  + scale_color_manual(values=c("black", "red")) +
+  theme_bw()  +
+  labs(x = "log2(Input FPKM + 0.1)", y = "log2(IP FPKM + 0.1)", 
+       title = "Liver 4 hrs Post LPS", family = 'Arial') +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  theme(text = element_text(size = 16, family='Arial'), axis.text.x = element_text(size = 16, family = 'Arial', color = 'black'),
+        axis.text.y = element_text(size = 16, family = 'Arial', color = 'black')) +
+  theme(legend.position="none") +
+  scale_x_continuous(limits=c(-3.35,16.1), breaks = c(0, 5, 10, 15)) +
+  scale_y_continuous(limits=c(-3.35,16.1), breaks = c(0, 5, 10, 15))
+
+
+Liver_LPS_2wk %>%
+  ggplot(aes(log2(Liver_LPS_2wk_N +0.1), log2(Liver_LPS_2wk_IP+0.1), color = Enr)) + 
+  geom_point(alpha = 0.3)  + scale_color_manual(values=c("black", "red")) +
+  theme_bw()  +
+  labs(x = "log2(Input FPKM + 0.1)", y = "log2(IP FPKM + 0.1)", 
+       title = "Liver 2 wks Post LPS", family = 'Arial') +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  theme(text = element_text(size = 16, family='Arial'), axis.text.x = element_text(size = 16, family = 'Arial', color = 'black'),
+        axis.text.y = element_text(size = 16, family = 'Arial', color = 'black')) +
+  theme(legend.position="none") +
+  scale_x_continuous(limits=c(-3.35,16.1), breaks = c(0, 5, 10, 15)) +
+  scale_y_continuous(limits=c(-3.35,16.1), breaks = c(0, 5, 10, 15))
+
+
+
+
+
+
+Heart_PBS %>%
+  ggplot(aes(log2(Heart_PBS_N +0.1), log2(Heart_PBS_IP+0.1), color = Enr)) + 
+  geom_point(alpha = 0.3)  + scale_color_manual(values=c("black", "red")) +
+  theme_bw()  +
+  labs(x = "log2(Input FPKM + 0.1)", y = "log2(IP FPKM + 0.1)", 
+       title = "Steady State Heart", family = 'Arial') +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  theme(text = element_text(size = 16, family='Arial'), axis.text.x = element_text(size = 16, family = 'Arial', color = 'black'),
+        axis.text.y = element_text(size = 16, family = 'Arial', color = 'black')) +
+  theme(legend.position="none") +
+  scale_x_continuous(limits=c(-3.35,16.1), breaks = c(0, 5, 10, 15)) +
+  scale_y_continuous(limits=c(-3.35,16.1), breaks = c(0, 5, 10, 15))
+
+
+Heart_LPS_4hr %>%
+  ggplot(aes(log2(Heart_LPS_4hr_N +0.1), log2(Heart_LPS_4hr_IP+0.1), color = Enr)) + 
+  geom_point(alpha = 0.3)  + scale_color_manual(values=c("black", "red")) +
+  theme_bw()  +
+  labs(x = "log2(Input FPKM + 0.1)", y = "log2(IP FPKM + 0.1)", 
+       title = "Heart 4 hrs Post LPS", family = 'Arial') +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  theme(text = element_text(size = 16, family='Arial'), axis.text.x = element_text(size = 16, family = 'Arial', color = 'black'),
+        axis.text.y = element_text(size = 16, family = 'Arial', color = 'black')) +
+  theme(legend.position="none") +
+  scale_x_continuous(limits=c(-3.35,16.1), breaks = c(0, 5, 10, 15)) +
+  scale_y_continuous(limits=c(-3.35,16.1), breaks = c(0, 5, 10, 15))
+
+
+Heart_LPS_2wk %>%
+  ggplot(aes(log2(Heart_LPS_2wk_N +0.1), log2(Heart_LPS_2wk_IP+0.1), color = Enr)) + 
+  geom_point(alpha = 0.3)  + scale_color_manual(values=c("black", "red")) +
+  theme_bw()  +
+  labs(x = "log2(Input FPKM + 0.1)", y = "log2(IP FPKM + 0.1)", 
+       title = "Heart 2 wks Post LPS", family = 'Arial') +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  theme(text = element_text(size = 16, family='Arial'), axis.text.x = element_text(size = 16, family = 'Arial', color = 'black'),
+        axis.text.y = element_text(size = 16, family = 'Arial', color = 'black')) +
+  theme(legend.position="none") +
+  scale_x_continuous(limits=c(-3.35,16.1), breaks = c(0, 5, 10, 15)) +
+  scale_y_continuous(limits=c(-3.35,16.1), breaks = c(0, 5, 10, 15))
+```
+
+Now I will reduce dimensionality using principle component analysis (PCA). First I filter our genes for coding genes only. Then transpose columns and rows. Next deleting any gene that has a zero value for all conditions.
+
+```{r}
+coding2 <- coding %>% `colnames<-`('tracking_id')
+
+pcatrans1 <- cuffnorm1[,c(1,2,7)] %>% inner_join(coding2)
+pcatrans2 <-spread(pcatrans1, key = 'tracking_id', value = 'FPKM')
+
+pcatrans3 <- pcatrans2[,-1]
+pcatrans4 <- pcatrans3[, colSums(pcatrans3 != 0) > 0]
+```
+
+Now I run the program prcomp to calculate principal components.
+
+```{r}
+pca_comp_lsp <- prcomp(pcatrans4, scale. = TRUE, center = TRUE, rank. = 100)
+
+```
+
+I want to add back the conditions that each value comes from.
+
+```{r}
+condition2 <- c("Heart_LPS_2wk_IP", "Heart_LPS_2wk_IP","Heart_LPS_2wk_N", "Heart_LPS_2wk_N",
+                "Heart_LPS_4hr_IP", "Heart_LPS_4hr_IP", "Heart_LPS_4hr_N", "Heart_LPS_4hr_N",
+                "Heart_PBS_IP", "Heart_PBS_IP", "Heart_PBS_N", "Heart_PBS_N",
+                "Liver_LPS_2wk_IP","Liver_LPS_2wk_IP","Liver_LPS_2wk_N","Liver_LPS_2wk_N",
+                "Liver_LPS_4hr_IP", "Liver_LPS_4hr_IP","Liver_LPS_4hr_N", "Liver_LPS_4hr_N",
+                "Liver_PBS_IP", "Liver_PBS_IP","Liver_PBS_N", "Liver_PBS_N")
+
+
+pca_lps_timecourse7 <- cbind(condition2, pcatrans4)
+```
+
+
+Now I will plot the PCA. 
+
+```{r}
+autoplot(pca_comp_lsp, data = pca_lps_timecourse7, colour = 'condition2', frame = F, size=3,
+         x= 1, y=2) +
+  theme_bw() + scale_colour_manual(values = c("green",'green4',"cyan",'cyan4',
+                                              "orange",'orange4',"purple",'purple4',
+                                              "blue",'blue4',"red",'red4')) +
+  theme(text = element_text(size = 16, family='Arial'), 
+        axis.text.x = element_text(size = 16, family = 'Arial', color = 'black'),
+        axis.text.y = element_text(size = 16, family = 'Arial', color = 'black'))
+```
+
+You can see that PC1 divides the tissue heart and liver while PC2 divides input from IP. 
+
+Next I will compose a list of genes that are enriched in any condition.
+
+```{r}
+Enriched_list <- Liver_PBS_Enriched %>% full_join(Liver_LPS_4hr_Enriched) %>% 
+  full_join(Liver_LPS_2wk_Enriched) %>% full_join(Heart_PBS_Enriched) %>% 
+  full_join(Heart_LPS_4hr_Enriched) %>% full_join(Heart_LPS_2wk_Enriched) %>% `colnames<-`('tracking_id')
+
+```
+
+Now I will repeat the steps above to come up with a PCA for all the conditions using only enriched genes.
+
+```{r}
+pcatransEnr <- pcatrans1 %>% inner_join(Enriched_list)
+pcatransEnr2 <-spread(pcatransEnr, key = 'tracking_id', value = 'FPKM')
+
+pcatransEnr3 <- pcatransEnr2[,-1]
+pcatransEnr4 <- pcatransEnr3[, colSums(pcatransEnr3 != 0) > 0]
+
+pca_comp_lspEnr <- prcomp(pcatransEnr4, scale. = TRUE, center = TRUE, rank. = 100)
+
+pca_lps_timecourseEnr <- cbind(condition2, pcatransEnr4)
+```
+
+Now to plot it. 
+
+```{r}
+autoplot(pca_comp_lspEnr, data = pca_lps_timecourseEnr, colour = 'condition2', frame = F, size=3,
+         x= 1, y=2) +
+  theme_bw() + scale_colour_manual(values = c("green",'green4',"cyan",'cyan4',
+                                              "orange",'orange4',"purple",'purple4',
+                                              "blue",'blue4',"red",'red4')) +
+  theme(text = element_text(size = 16, family='Arial'), 
+        axis.text.x = element_text(size = 16, family = 'Arial', color = 'black'),
+        axis.text.y = element_text(size = 16, family = 'Arial', color = 'black'))
+```
+
+By taking out genes that aren't enriched the defining features of the inputs are now gone and they all group together at this point. 2 hrs post LPS treatment in IPs now differentiates itself from steady state and 2 wks post LPS in IPs. 
+
+Repeating the steps above with IPs only for all genes.
+
+```{r}
+pcatransIPs <- pcatrans2[c(1,2,5,6,9,10,13,14,17,18,21,22),]
+
+pcatransIP2 <- pcatransIPs[,-1]
+pcatransIP3 <- pcatransIP2[, colSums(pcatransIP2 != 0) > 0]
+
+pca_comp_lspIP <- prcomp(pcatransIP3, scale. = TRUE, center = TRUE, rank. = 100)
+
+
+
+condition <- c("Heart_LPS_2wk_IP", "Heart_LPS_2wk_IP",
+                "Heart_LPS_4hr_IP", "Heart_LPS_4hr_IP",
+                "Heart_PBS_IP", "Heart_PBS_IP",
+                "Liver_LPS_2wk_IP","Liver_LPS_2wk_IP",
+                "Liver_LPS_4hr_IP", "Liver_LPS_4hr_IP",
+                "Liver_PBS_IP", "Liver_PBS_IP")
+
+
+pca_lps_timecourseIP <- cbind(condition, pcatransIP3)
+
+```
+
+Now ploting it.
+
+```{r}
+autoplot(pca_comp_lspIP, data = pca_lps_timecourseIP, colour = 'condition', frame = F, size=3,
+         x= 1, y=2) +
+  theme_bw() + scale_colour_manual(values = c("green","cyan",
+                                              "orange","purple",
+                                              "blue","red")) +
+  theme(text = element_text(size = 16, family='Arial'), 
+        axis.text.x = element_text(size = 16, family = 'Arial', color = 'black'),
+        axis.text.y = element_text(size = 16, family = 'Arial', color = 'black'))
+```
+
+Here PC1 divides the tissues heart and liver while PC2 divides 2 hrs post LPS from steady steady state and 2 wks post LPS. Here Liver steady state and 2 wks post LPS looks most closely related with heart respective conditions slightly less closely related.
+
+Now repeating the above steps for IPs only for enriched genes only. 
+
+```{r}
+pcatransEnr2 <-spread(pcatransEnr, key = 'tracking_id', value = 'FPKM')
+pcatransIPEnr <- pcatransEnr2[c(1,2,5,6,9,10,13,14,17,18,21,22),]
+
+
+pcatransIPEnr2 <- pcatransIPEnr[,-1]
+pcatransIPEnr3 <- pcatransIPEnr2[, colSums(pcatransIPEnr2 != 0) > 0]
+
+pca_comp_lspEnrIP <- prcomp(pcatransIPEnr3, scale. = TRUE, center = TRUE, rank. = 100)
+
+pca_lps_timecourseEnrIP <- cbind(condition, pcatransIPEnr3)
+```
+
+
+Now plotting it.
+
+```{r}
+autoplot(pca_comp_lspEnrIP, data = pca_lps_timecourseEnrIP, colour = 'condition', frame = F, size=3,
+         x= 1, y=2) +
+  theme_bw() + scale_colour_manual(values = c("green","cyan",
+                                              "orange","purple",
+                                              "blue","red")) +
+  theme(text = element_text(size = 16, family='Arial'), 
+        axis.text.x = element_text(size = 16, family = 'Arial', color = 'black'),
+        axis.text.y = element_text(size = 16, family = 'Arial', color = 'black'))
+```
+
+Now PC1 divides 2 hrs post LPS from steady state and 2 wks post LPS. PC2 now divides the tissues liver and heart. Now heart steady state and 2 wks post LPS are more closely related and liver steady state and 2 wks post LPS are less closely related. 
